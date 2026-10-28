@@ -10,7 +10,9 @@ function M.check()
   -- Path resolution needs no parser; the cursor helpers and gd on an imported
   -- name do.
   for _, lang in ipairs { "javascript", "typescript", "tsx" } do
-    if pcall(vim.treesitter.language.add, lang) then
+    -- add() returns nil + error on 0.11+ rather than throwing.
+    local ok, loaded = pcall(vim.treesitter.language.add, lang)
+    if ok and loaded then
       vim.health.ok(lang .. " parser found")
     else
       vim.health.warn(

@@ -15,7 +15,18 @@ M.goto_definition = core.goto_definition
 -- normal 'path' search still applies.
 function M.includeexpr(fname)
   local file = vim.api.nvim_buf_get_name(0)
-  return file ~= "" and core.resolve(fname, file) or fname
+  if file == "" then
+    return fname
+  end
+  -- '@' isn't in the default 'isfname' (a global option, so not ours to
+  -- change): "@org/pkg" and "@/x" arrive as "org/pkg" and "/x".
+  if vim.api.nvim_get_current_line():find("@" .. fname, 1, true) then
+    local r = core.resolve("@" .. fname, file)
+    if r then
+      return r
+    end
+  end
+  return core.resolve(fname, file) or fname
 end
 
 local function default_fallback()
@@ -39,6 +50,13 @@ end
 
 function M.setup(opts)
   config.set(opts)
+  -- Core maps these filetypes to same-named languages, which have no parser;
+  -- nvim-treesitter registers the same, so only fill the gap without it.
+  for ft, lang in pairs { typescriptreact = "tsx", javascriptreact = "javascript" } do
+    if vim.treesitter.language.get_lang(ft) == ft then
+      vim.treesitter.language.register(lang, ft)
+    end
+  end
   local group = vim.api.nvim_create_augroup("import-goto", { clear = true })
   vim.api.nvim_create_autocmd("FileType", {
     group = group,

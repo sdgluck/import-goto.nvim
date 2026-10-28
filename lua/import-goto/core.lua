@@ -242,6 +242,35 @@ local function package_root_entry(pkg)
   end
 end
 
+-- A build artifact in a workspace package (dist/index.js, lib/foo.d.ts) is
+-- rarely what you want to read: hop to the matching source file if one exists.
+-- Only outside node_modules; published packages don't ship their sources.
+-- Applied to package entry points only: a relative "./lib/x.js" in a source
+-- tree means that file, not a sibling src/x.ts.
+local function prefer_source(path)
+  local real = uv.fs_realpath(path) or path
+  if real:find("/node_modules/", 1, true) then
+    return real
+  end
+  if not (real:match "%.d%.[mc]?ts$" or real:match "%.[mc]?js$") then
+    return real
+  end
+  for _, out in ipairs(config.options.out_dirs) do
+    local pre, rest = real:match("^(.*)/" .. vim.pesc(out) .. "/(.*)$")
+    if pre then
+      rest = rest:gsub("%.d%.[mc]?ts$", ""):gsub("%.[mc]?js$", "")
+      for _, root in ipairs { pre .. "/src/", pre .. "/" } do
+        for _, e in ipairs { ".ts", ".tsx", ".mts", ".cts", "/index.ts", "/index.tsx" } do
+          if is_file(root .. rest .. e) then
+            return root .. rest .. e
+          end
+        end
+      end
+    end
+  end
+  return real
+end
+
 -- `base` as written, then with extensions, then as a directory (package.json
 -- entry or index file). Mirrors TS's module resolution probing order.
 function resolve_file(base, depth)
@@ -273,7 +302,7 @@ function resolve_file(base, depth)
       if p ~= vim.fs.normalize(base) then
         local r = resolve_file(p, depth + 1)
         if r then
-          return r
+          return prefer_source(r)
         end
       end
     end
@@ -283,33 +312,6 @@ function resolve_file(base, depth)
       end
     end
   end
-end
-
--- A build artifact in a workspace package (dist/index.js, lib/foo.d.ts) is
--- rarely what you want to read: hop to the matching source file if one exists.
--- Only outside node_modules; published packages don't ship their sources.
-local function prefer_source(path)
-  local real = uv.fs_realpath(path) or path
-  if real:find("/node_modules/", 1, true) then
-    return real
-  end
-  if not (real:match "%.d%.[mc]?ts$" or real:match "%.[mc]?js$") then
-    return real
-  end
-  for _, out in ipairs(config.options.out_dirs) do
-    local pre, rest = real:match("^(.*)/" .. out .. "/(.*)$")
-    if pre then
-      rest = rest:gsub("%.d%.[mc]?ts$", ""):gsub("%.[mc]?js$", "")
-      for _, root in ipairs { pre .. "/src/", pre .. "/" } do
-        for _, e in ipairs { ".ts", ".tsx", ".mts", ".cts", "/index.ts", "/index.tsx" } do
-          if is_file(root .. rest .. e) then
-            return root .. rest .. e
-          end
-        end
-      end
-    end
-  end
-  return real
 end
 
 -- `extends` may name a file ("./base.json", "../tsconfig") or a package
@@ -548,6 +550,7 @@ function M.resolve(spec, file)
     found = resolve_file(join(dir, spec))
   elseif spec:sub(1, 1) == "#" then
     found = resolve_subpath_import(spec, file)
+    found = found and prefer_source(found)
   else
     local cfg = project_config(file)
     found = resolve_tsconfig_paths(spec, cfg)
@@ -560,17 +563,31 @@ function M.resolve(spec, file)
     end
     if not found then
       found = resolve_package(spec, file)
+      found = found and prefer_source(found)
     end
   end
 
-  return found and prefer_source(found)
+  return found and (uv.fs_realpath(found) or found)
+end
+
+-- Named node under the cursor. get_node() doesn't parse, so without
+-- treesitter highlighting (or before 0.12's async parse lands) the tree would
+-- be missing or stale.
+local function node_at_cursor()
+  local ok, parser = pcall(vim.treesitter.get_parser, 0, nil, { error = false })
+  if not ok or not parser then
+    return nil
+  end
+  parser:parse()
+  local got, node = pcall(vim.treesitter.get_node)
+  return got and node or nil
 end
 
 -- The module specifier under the cursor, or nil when the cursor isn't on the
 -- path string of an import/export/require/import()/jest.mock(...).
 function M.specifier_at_cursor()
-  local ok, node = pcall(vim.treesitter.get_node)
-  if not ok or not node then
+  local node = node_at_cursor()
+  if not node then
     return nil
   end
   for _ = 1, 2 do
@@ -847,8 +864,8 @@ end
 -- its export in the resolved module. Returns false when the word under the
 -- cursor isn't an import binding or the module doesn't resolve.
 function M.goto_imported_name()
-  local ok, node = pcall(vim.treesitter.get_node)
-  if not ok or not node then
+  local node = node_at_cursor()
+  if not node then
     return false
   end
   local nt = node:type()

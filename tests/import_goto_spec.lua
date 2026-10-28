@@ -77,6 +77,15 @@ describe("import-goto", function()
       assert.equals(abs "src/lib/entry.ts", resolve("./lib", "src/a.ts"))
     end)
 
+    it("doesn't hop a relative import under lib/ to an unrelated src file", function()
+      tree {
+        ["src/app.ts"] = "",
+        ["src/lib/format.js"] = "",
+        ["src/format.ts"] = "",
+      }
+      assert.equals(abs "src/lib/format.js", resolve("./lib/format.js", "src/app.ts"))
+    end)
+
     it("returns nil for a missing file", function()
       tree { ["src/a.ts"] = "" }
       assert.is_nil(resolve("./nope", "src/a.ts"))
@@ -223,6 +232,20 @@ describe("import-goto", function()
       assert.equals("./three", ig.specifier_at_cursor())
       open("d.ts", [[jest.mock("./four", () => ({}))]], "./four")
       assert.equals("./four", ig.specifier_at_cursor())
+    end)
+
+    it("works before the buffer has been parsed", function()
+      tree { ["a.ts"] = [[import x from "./one"]] }
+      vim.cmd.edit(vim.fn.fnameescape(root .. "/a.ts"))
+      vim.api.nvim_win_set_cursor(0, { 1, 16 })
+      assert.equals("./one", ig.specifier_at_cursor())
+    end)
+
+    it("reads paths in .tsx and .jsx buffers", function()
+      open("a.tsx", [[import x from "./one"]], "./one")
+      assert.equals("./one", ig.specifier_at_cursor())
+      open("b.jsx", [[import y from "./two"]], "./two")
+      assert.equals("./two", ig.specifier_at_cursor())
     end)
 
     it("ignores ordinary strings and dynamic template paths", function()

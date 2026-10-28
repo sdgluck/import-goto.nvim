@@ -43,6 +43,33 @@ describe("setup", function()
     assert.equals("./nope", ig.includeexpr "./nope")
   end)
 
+  it("includeexpr restores the '@' that 'isfname' drops from <cfile>", function()
+    local pkg = write("node_modules/@org/pkg/index.ts", "")
+    local alias = write("src/components/x.ts", "")
+    write("tsconfig.json", [[{ "compilerOptions": { "paths": { "@/*": ["./src/*"] } } }]])
+    vim.cmd.edit(write("src/a.ts", 'import y from "@org/pkg"\nimport x from "@/components/x"'))
+    vim.api.nvim_win_set_cursor(0, { 1, 16 })
+    assert.equals(pkg, ig.includeexpr(vim.fn.expand "<cfile>"))
+    vim.api.nvim_win_set_cursor(0, { 2, 16 })
+    assert.equals(alias, ig.includeexpr(vim.fn.expand "<cfile>"))
+  end)
+
+  it("health reports a parser that fails to load", function()
+    local add, warn, ok = vim.treesitter.language.add, vim.health.warn, vim.health.ok
+    local warned = {}
+    vim.treesitter.language.add = function()
+      return nil, "no parser"
+    end
+    vim.health.warn = function(msg)
+      warned[#warned + 1] = msg
+    end
+    vim.health.ok = function() end
+    local done, err = pcall(require("import-goto.health").check)
+    vim.treesitter.language.add, vim.health.warn, vim.health.ok = add, warn, ok
+    assert(done, err)
+    assert.same({ "javascript parser missing", "typescript parser missing", "tsx parser missing" }, warned)
+  end)
+
   it("replaces the condition order instead of merging it", function()
     write("node_modules/pkg/package.json", [[{ "exports": { "import": "./esm.js", "types": "./types.d.ts" } }]])
     local esm = write("node_modules/pkg/esm.js", "")
