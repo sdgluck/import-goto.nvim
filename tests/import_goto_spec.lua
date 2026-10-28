@@ -139,6 +139,21 @@ describe("import-goto", function()
       assert.equals(abs "src/x.ts", resolve("@/x", "src/a.ts"))
     end)
 
+    it("picks up a same-second, same-size tsconfig edit", function()
+      tree {
+        ["tsconfig.json"] = [[{ "compilerOptions": { "paths": { "@a/*": ["./src/*"] } } }]],
+        ["src/x.ts"] = "",
+        ["src/a.ts"] = "",
+      }
+      assert.equals(abs "src/x.ts", resolve("@a/x", "src/a.ts"))
+      local p = root .. "/tsconfig.json"
+      local before = vim.uv.fs_stat(p).mtime
+      -- Same length, same second; only the nanoseconds move.
+      vim.fn.writefile({ [[{ "compilerOptions": { "paths": { "@b/*": ["./src/*"] } } }]] }, p)
+      vim.uv.fs_utime(p, before.sec, before.sec + (before.nsec + 1) / 1e9)
+      assert.equals(abs "src/x.ts", resolve("@b/x", "src/a.ts"))
+    end)
+
     it("treats /path as root-relative when it isn't absolute on disk", function()
       tree {
         ["tsconfig.json"] = "{}",
@@ -251,6 +266,8 @@ describe("import-goto", function()
     it("ignores ordinary strings and dynamic template paths", function()
       open("a.ts", [[const s = "./not-a-module"]], "./not")
       assert.is_nil(ig.specifier_at_cursor())
+      open("c.ts", [[export default "./not-a-module"]], "./not")
+      assert.is_nil(ig.specifier_at_cursor())
       open("b.ts", "const m = import(`./x/${name}`)", "./x")
       assert.is_nil(ig.specifier_at_cursor())
     end)
@@ -308,6 +325,49 @@ describe("import-goto", function()
       local path, row = here()
       assert.equals(abs "lib.js", path)
       assert.equals(2, row)
+    end)
+
+    it("prefers a CommonJS declaration over an earlier top-level call", function()
+      tree { ["lib.js"] = "foo()\nfunction foo() {}\nmodule.exports = { foo }" }
+      open("a.js", 'const { foo } = require("./lib")', "foo")
+      assert.is_true(ig.goto_imported_name())
+      local path, row = here()
+      assert.equals(abs "lib.js", path)
+      assert.equals(2, row)
+    end)
+
+    it("doesn't line-scan an ES module for an unexported namesake", function()
+      tree { ["lib.ts"] = "export const bar = 1\nfoo()" }
+      open("a.ts", 'import { foo } from "./lib"', "foo")
+      assert.is_true(ig.goto_imported_name())
+      local path, row = here()
+      assert.equals(abs "lib.ts", path)
+      assert.equals(1, row)
+    end)
+
+    it("still line-scans `export =` declaration files", function()
+      tree { ["lib.d.ts"] = "declare namespace ns {\n  function foo(): void\n}\nexport = ns" }
+      open("a.ts", 'import { foo } from "./lib"', "foo")
+      assert.is_true(ig.goto_imported_name())
+      local path, row = here()
+      assert.equals(abs "lib.d.ts", path)
+      assert.equals(2, row)
+    end)
+
+    it("reports an :edit failure instead of erroring", function()
+      tree { ["b.ts"] = "" }
+      open("a.ts", 'import x from "./b"', "./b")
+      local hidden, notify, msgs = vim.o.hidden, vim.notify, {}
+      vim.o.hidden = false
+      vim.notify = function(msg)
+        msgs[#msgs + 1] = msg
+      end
+      vim.api.nvim_buf_set_lines(0, -1, -1, false, { "// edited" })
+      local ok, err = pcall(ig.goto_definition, function() end)
+      vim.o.hidden, vim.notify = hidden, notify
+      assert(ok, err)
+      assert.equals(abs "a.ts", (here()))
+      assert.matches("E37", msgs[1])
     end)
 
     it("returns false for a name that isn't imported", function()

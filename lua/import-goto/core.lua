@@ -122,7 +122,8 @@ local function strip_jsonc(s)
   return table.concat(res)
 end
 
--- Parsed JSON files, invalidated by mtime so editing a tsconfig takes effect.
+-- Parsed JSON files, invalidated by mtime (to the nanosecond: two quick
+-- same-size edits share a second) so editing a tsconfig takes effect.
 local json_cache = {}
 
 local function read_json(path)
@@ -131,7 +132,7 @@ local function read_json(path)
     return nil
   end
   local hit = json_cache[path]
-  if hit and hit.mtime == s.mtime.sec and hit.size == s.size then
+  if hit and hit.sec == s.mtime.sec and hit.nsec == s.mtime.nsec and hit.size == s.size then
     return hit.value
   end
   local fd = io.open(path, "r")
@@ -142,7 +143,7 @@ local function read_json(path)
   fd:close()
   local ok, value = pcall(vim.json.decode, strip_jsonc(text), { luanil = { object = true, array = true } })
   value = ok and type(value) == "table" and value or nil
-  json_cache[path] = { mtime = s.mtime.sec, size = s.size, value = value }
+  json_cache[path] = { sec = s.mtime.sec, nsec = s.mtime.nsec, size = s.size, value = value }
   return value
 end
 
@@ -613,7 +614,9 @@ function M.specifier_at_cursor()
 
   local parent = node:parent()
   local pt = parent and parent:type()
-  local is_module = pt == "import_statement" or pt == "export_statement" or pt == "import_require_clause"
+  -- `export default "x"` is an export_statement too: only its `source` counts.
+  local is_module = pt == "import_require_clause"
+    or (pt == "import_statement" or pt == "export_statement") and parent:field("source")[1] == node
   if not is_module and pt == "arguments" and parent:named_child(0) == node then
     local call = parent:parent()
     local fn = call and call:type() == "call_expression" and call:field("function")[1]
@@ -779,7 +782,7 @@ function find_export(path, name, depth)
     end
   end
 
-  local star_sources = {}
+  local star_sources, esm = {}, false
   for stmt in root:iter_children() do
     if stmt:type() == "export_statement" then
       local source = stmt:field("source")[1]
@@ -800,6 +803,10 @@ function find_export(path, name, depth)
         return at(stmt)
       end
       local decl = stmt:field("declaration")[1]
+      -- Everything but TS's `export = x`, whose members the line scan finds.
+      if decl or clause or is_default or ns or spec then
+        esm = true
+      end
       if decl and name ~= "default" then
         for _, n in ipairs(declared_names(decl)) do
           if node_text(n, src) == name then
@@ -846,17 +853,49 @@ function find_export(path, name, depth)
     end
   end
 
+  -- An ES module's exports are all above; scanning lines would only find
+  -- unexported namesakes.
+  if esm then
+    return nil
+  end
+
   -- CommonJS: exports.name = ..., module.exports = { name }, or any
-  -- top-level declaration that happens to carry the name.
+  -- declaration that happens to carry the name (also `declare module "fs"`
+  -- blocks and `export =` namespaces in .d.ts files). Declarations first, so
+  -- a top-level call `name()` above them doesn't win.
   local esc = vim.pesc(name)
-  for i, line in ipairs(lines) do
-    local s = line:find("exports%." .. esc .. "%f[^%w_$]")
-      or line:find("^%s*" .. esc .. "%f[^%w_$]%s*[,:(}]")
-      or line:find("%f[%w_$](function%*?%s+" .. esc .. "%f[^%w_$])")
-      or line:find("%f[%w_$](class%s+" .. esc .. "%f[^%w_$])")
-    if s then
-      return { path = path, row = i - 1, col = s - 1 }
+  local passes = {
+    {
+      "exports%." .. esc .. "%f[^%w_$]",
+      "%f[%w_$](function%*?%s+" .. esc .. "%f[^%w_$])",
+      "%f[%w_$](class%s+" .. esc .. "%f[^%w_$])",
+    },
+    { "^%s*" .. esc .. "%f[^%w_$]%s*[,:(}]" },
+  }
+  for _, pats in ipairs(passes) do
+    for i, line in ipairs(lines) do
+      for _, pat in ipairs(pats) do
+        local s = line:find(pat)
+        if s then
+          return { path = path, row = i - 1, col = s - 1 }
+        end
+      end
     end
+  end
+end
+
+-- Open `path` (at 0-based row/col when given), leaving a jumplist entry. An
+-- :edit failure (E37 with 'nohidden' and a modified buffer) is reported as a
+-- message rather than a Lua error out of the mapping.
+local function jump(path, row, col)
+  vim.cmd "normal! m'"
+  local ok, err = pcall(vim.cmd.edit, vim.fn.fnameescape(path))
+  if not ok then
+    vim.notify((tostring(err):gsub("^Vim:", "")), vim.log.levels.ERROR)
+    return
+  end
+  if row then
+    pcall(vim.api.nvim_win_set_cursor, 0, { row + 1, col })
   end
 end
 
@@ -887,11 +926,7 @@ function M.goto_imported_name()
     return false
   end
   local loc = (name and find_export(target, name)) or { path = target }
-  vim.cmd "normal! m'"
-  vim.cmd.edit(vim.fn.fnameescape(loc.path))
-  if loc.row then
-    pcall(vim.api.nvim_win_set_cursor, 0, { loc.row + 1, loc.col })
-  end
+  jump(loc.path, loc.row, loc.col)
   return true
 end
 
@@ -910,8 +945,7 @@ function M.goto_definition(fallback)
   local file = vim.api.nvim_buf_get_name(0)
   local target = file ~= "" and M.resolve(spec, file)
   if target then
-    vim.cmd "normal! m'"
-    vim.cmd.edit(vim.fn.fnameescape(target))
+    jump(target)
     return
   end
   if has_lsp then
