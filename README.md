@@ -18,8 +18,10 @@ jest.mock("../api/client");               // jest/vitest mock paths too
 - **Source, not build output.** A workspace package whose entry is
   `dist/index.js` lands on `src/index.ts`.
 - **Works without an LSP.** In plain-JS directories, `gd` on an imported name
-  (or any later use of it) jumps to the export in the resolved module,
-  following `export { x as y } from`, `export *`, and CommonJS `exports.x`.
+  (or any later use of it, or `ns.x` on a namespace import) jumps to the
+  export in the resolved module, following `export { x as y } from`,
+  `export *`, `export default x`, re-exported imports, and CommonJS
+  `exports.x`. `<C-t>` comes back, as with LSP `gd`.
 - **Falls back cleanly.** Anything it can't resolve (e.g. bundler-only
   aliases) goes to your LSP's definition, then to built-in `gd`.
 
@@ -27,7 +29,7 @@ jest.mock("../api/client");               // jest/vitest mock paths too
 
 | Specifier | Resolved via |
 |---|---|
-| `./x` `../x` | extension probing, `.js`→`.ts` swaps, `index.*`, a directory's `package.json` entry |
+| `./x` `../x` | extension probing, `.js`→`.ts` swaps, `index.*`, a directory's `package.json` entry; bundler `?query` suffixes dropped |
 | `@alias/x` `~/x` | tsconfig/jsconfig `paths` + `baseUrl`, following `extends` (files and packages), `${configDir}`, solution-style `references` |
 | `/x` | absolute, else root-relative to the project |
 | `#internal` | `package.json` `imports` |

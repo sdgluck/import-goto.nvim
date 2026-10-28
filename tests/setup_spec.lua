@@ -36,6 +36,27 @@ describe("setup", function()
     assert.equals("", vim.bo.includeexpr)
   end)
 
+  it("takes the mapping and includeexpr back when the filetype changes", function()
+    vim.cmd.edit(write("a.ts", ""))
+    vim.bo.filetype = "text"
+    assert.same({}, vim.fn.maparg("gd", "n", false, true))
+    assert.equals("", vim.bo.includeexpr)
+  end)
+
+  it("takes the mapping back from open buffers when setup() turns it off", function()
+    vim.cmd.edit(write("a.ts", ""))
+    ig.setup { gd = false }
+    assert.same({}, vim.fn.maparg("gd", "n", false, true))
+    assert.matches("import%-goto", vim.bo.includeexpr)
+  end)
+
+  it("leaves a user's own buffer-local gd alone", function()
+    vim.cmd.edit(write("a.txt", ""))
+    vim.keymap.set("n", "gd", "<Nop>", { buffer = true, desc = "mine" })
+    ig.setup()
+    assert.equals("mine", vim.fn.maparg("gd", "n", false, true).desc)
+  end)
+
   it("includeexpr resolves a specifier, or returns it unchanged", function()
     local x = write("src/x.ts", "")
     vim.cmd.edit(write("src/a.ts", ""))

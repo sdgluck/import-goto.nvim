@@ -86,6 +86,11 @@ describe("import-goto", function()
       assert.equals(abs "src/lib/format.js", resolve("./lib/format.js", "src/app.ts"))
     end)
 
+    it("drops bundler ?query suffixes", function()
+      tree { ["src/icon.svg"] = "", ["src/a.ts"] = "" }
+      assert.equals(abs "src/icon.svg", resolve("./icon.svg?react", "src/a.ts"))
+    end)
+
     it("returns nil for a missing file", function()
       tree { ["src/a.ts"] = "" }
       assert.is_nil(resolve("./nope", "src/a.ts"))
@@ -315,7 +320,8 @@ describe("import-goto", function()
       assert.is_true(ig.goto_imported_name())
       local path, row = here()
       assert.equals(abs "lib.ts", path)
-      assert.equals(2, row)
+      -- `export default x` -> x's declaration.
+      assert.equals(1, row)
     end)
 
     it("finds CommonJS exports.name for a destructured require", function()
@@ -325,6 +331,50 @@ describe("import-goto", function()
       local path, row = here()
       assert.equals(abs "lib.js", path)
       assert.equals(2, row)
+    end)
+
+    it("follows `export default local` to its declaration", function()
+      tree { ["lib.ts"] = "\nfunction thing() {}\nexport default thing" }
+      open("a.ts", 'import t from "./lib"', "t from")
+      assert.is_true(ig.goto_imported_name())
+      local path, row, col = here()
+      assert.equals(abs "lib.ts", path)
+      assert.same({ 2, 9 }, { row, col })
+    end)
+
+    it("follows a re-exported import to its source module", function()
+      tree {
+        ["impl.ts"] = "\nexport const foo = 1",
+        ["index.ts"] = 'import { foo } from "./impl"\nexport { foo }',
+      }
+      open("a.ts", 'import { foo } from "./index"', "foo")
+      assert.is_true(ig.goto_imported_name())
+      local path, row = here()
+      assert.equals(abs "impl.ts", path)
+      assert.equals(2, row)
+    end)
+
+    it("jumps from ns.member (value or type) to the member's export", function()
+      tree { ["lib.ts"] = "\nexport function foo() {}\nexport type Bar = 1" }
+      open("a.ts", 'import * as ns from "./lib"\nns.foo()\nlet b: ns.Bar', "foo")
+      assert.is_true(ig.goto_imported_name())
+      local path, row = here()
+      assert.equals(abs "lib.ts", path)
+      assert.equals(2, row)
+      open("a.ts", 'import * as ns from "./lib"\nns.foo()\nlet b: ns.Bar', "Bar")
+      assert.is_true(ig.goto_imported_name())
+      path, row = here()
+      assert.equals(abs "lib.ts", path)
+      assert.equals(3, row)
+    end)
+
+    it("pushes the tagstack so <C-t> comes back", function()
+      tree { ["b.ts"] = "" }
+      open("a.ts", 'import x from "./b"', "./b")
+      ig.goto_definition(function() end)
+      assert.equals(abs "b.ts", (here()))
+      vim.cmd "pop"
+      assert.equals(abs "a.ts", (here()))
     end)
 
     it("prefers a CommonJS declaration over an earlier top-level call", function()

@@ -55,8 +55,9 @@ specifier_at_cursor()                *import-goto.specifier_at_cursor()*
     on one (or it is a template string with substitutions).
 
 goto_imported_name()                  *import-goto.goto_imported_name()*
-    Jump to the export of the imported name under the cursor. Returns false
-    when the word is not an import binding or its module does not resolve.
+    Jump to the export of the imported name under the cursor (or of `x` in
+    `ns.x`, for a namespace import). Returns false when the word is not an
+    import binding or its module does not resolve.
 
 goto_definition({fallback})              *import-goto.goto_definition()*
     The `gd` behaviour: open the resolved import path, else call {fallback}.

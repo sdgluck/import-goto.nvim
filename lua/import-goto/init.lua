@@ -37,14 +37,31 @@ local function default_fallback()
   end
 end
 
+local DESC = "Go to definition (import-goto)"
+local INCLUDEEXPR = "v:lua.require'import-goto'.includeexpr(v:fname)"
+
+-- Remove what attach() set on `buf`, leaving anything the user set instead.
+local function detach(buf)
+  for _, m in ipairs(vim.api.nvim_buf_get_keymap(buf, "n")) do
+    if m.lhs == "gd" and m.desc == DESC then
+      vim.api.nvim_buf_del_keymap(buf, "n", "gd")
+    end
+  end
+  if vim.bo[buf].includeexpr == INCLUDEEXPR then
+    vim.bo[buf].includeexpr = ""
+  end
+end
+
 local function attach(buf)
+  -- Start clean, so re-running setup() with gd/gf off takes them back.
+  detach(buf)
   if config.options.gd then
     vim.keymap.set("n", "gd", function()
       core.goto_definition(default_fallback)
-    end, { buffer = buf, desc = "Go to definition (import-goto)" })
+    end, { buffer = buf, desc = DESC })
   end
   if config.options.gf then
-    vim.bo[buf].includeexpr = "v:lua.require'import-goto'.includeexpr(v:fname)"
+    vim.bo[buf].includeexpr = INCLUDEEXPR
   end
 end
 
@@ -57,18 +74,26 @@ function M.setup(opts)
       vim.treesitter.language.register(lang, ft)
     end
   end
+  local function refresh(buf)
+    if vim.tbl_contains(config.options.filetypes, vim.bo[buf].filetype) then
+      attach(buf)
+    else
+      detach(buf)
+    end
+  end
   local group = vim.api.nvim_create_augroup("import-goto", { clear = true })
+  -- Every filetype, so a buffer switched away from JS/TS loses the mapping.
   vim.api.nvim_create_autocmd("FileType", {
     group = group,
-    pattern = config.options.filetypes,
     callback = function(args)
-      attach(args.buf)
+      refresh(args.buf)
     end,
   })
-  -- Buffers already open when setup() runs (lazy-loaded on ft).
+  -- Buffers already open when setup() runs (lazy-loaded on ft, or setup()
+  -- called again with different options).
   for _, buf in ipairs(vim.api.nvim_list_bufs()) do
-    if vim.api.nvim_buf_is_loaded(buf) and vim.tbl_contains(config.options.filetypes, vim.bo[buf].filetype) then
-      attach(buf)
+    if vim.api.nvim_buf_is_loaded(buf) then
+      refresh(buf)
     end
   end
 end

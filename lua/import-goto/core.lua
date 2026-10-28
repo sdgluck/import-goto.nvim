@@ -544,6 +544,8 @@ end
 
 -- Resolve a module specifier written in `file` to a path on disk, or nil.
 function M.resolve(spec, file)
+  -- Bundler queries ("./icon.svg?react", "./x.css?inline") aren't on disk.
+  spec = spec:gsub("^(.+)%?.*$", "%1")
   local dir = vim.fs.dirname(file)
   local found
 
@@ -656,9 +658,9 @@ local function lang_for(path)
 end
 
 -- The module + exported name that `word` was imported as at the top level of
--- the buffer. name: an export name, "default", or nil for the whole module
+-- `root`, whose text is `src` (a buffer or a string). name: an export name, "default", or nil for the whole module
 -- (`import * as ns`, `const ns = require(...)`).
-local function imported_binding(root, word)
+local function imported_binding(root, word, src)
   local function children(node, ty)
     local out = {}
     for c in node:iter_children() do
@@ -671,25 +673,25 @@ local function imported_binding(root, word)
 
   for stmt in root:iter_children() do
     local st = stmt:type()
-    local src = stmt:field("source")[1]
-    if st == "import_statement" and src then
-      local spec = unquote(node_text(src, 0))
+    local source = stmt:field("source")[1]
+    if st == "import_statement" and source then
+      local spec = unquote(node_text(source, src))
       for _, clause in ipairs(children(stmt, "import_clause")) do
         for c in clause:iter_children() do
           local ct = c:type()
-          if ct == "identifier" and node_text(c, 0) == word then
+          if ct == "identifier" and node_text(c, src) == word then
             return spec, "default"
           elseif ct == "namespace_import" then
             for _, id in ipairs(children(c, "identifier")) do
-              if node_text(id, 0) == word then
+              if node_text(id, src) == word then
                 return spec, nil
               end
             end
           elseif ct == "named_imports" then
             for _, s in ipairs(children(c, "import_specifier")) do
               local name, alias = s:field("name")[1], s:field("alias")[1]
-              if name and node_text(alias or name, 0) == word then
-                return spec, unquote(node_text(name, 0))
+              if name and node_text(alias or name, src) == word then
+                return spec, unquote(node_text(name, src))
               end
             end
           end
@@ -700,21 +702,21 @@ local function imported_binding(root, word)
       for _, decl in ipairs(children(stmt, "variable_declarator")) do
         local value, pat = decl:field("value")[1], decl:field("name")[1]
         local fn = value and value:type() == "call_expression" and value:field("function")[1]
-        local args = fn and node_text(fn, 0) == "require" and value:field("arguments")[1]
+        local args = fn and node_text(fn, src) == "require" and value:field("arguments")[1]
         local arg = args and args:named_child(0)
         if arg and arg:type() == "string" and pat then
-          local spec = unquote(node_text(arg, 0))
-          if pat:type() == "identifier" and node_text(pat, 0) == word then
+          local spec = unquote(node_text(arg, src))
+          if pat:type() == "identifier" and node_text(pat, src) == word then
             return spec, nil
           elseif pat:type() == "object_pattern" then
             for p in pat:iter_children() do
               local pt = p:type()
-              if pt == "shorthand_property_identifier_pattern" and node_text(p, 0) == word then
+              if pt == "shorthand_property_identifier_pattern" and node_text(p, src) == word then
                 return spec, word
               elseif pt == "pair_pattern" then
                 local key, val = p:field("key")[1], p:field("value")[1]
-                if key and val and node_text(val, 0) == word then
-                  return spec, unquote(node_text(key, 0))
+                if key and val and node_text(val, src) == word then
+                  return spec, unquote(node_text(key, src))
                 end
               end
             end
@@ -770,7 +772,9 @@ function find_export(path, name, depth)
     return { path = path, row = row, col = col }
   end
 
-  -- Top-level declaration of a local name, for `export { local as name }`.
+  -- Where a local name re-exported by `export { local as name }` or
+  -- `export default local` comes from: its top-level declaration, else the
+  -- module it was imported from.
   local function local_decl(local_name)
     for stmt in root:iter_children() do
       local decl = stmt:type() == "export_statement" and stmt:field("declaration")[1] or stmt
@@ -779,6 +783,11 @@ function find_export(path, name, depth)
           return at(n)
         end
       end
+    end
+    local spec, inner = imported_binding(root, local_name, src)
+    local target = spec and M.resolve(spec, path)
+    if target then
+      return inner and find_export(target, inner, depth + 1) or { path = target }
     end
   end
 
@@ -800,7 +809,8 @@ function find_export(path, name, depth)
       end
 
       if name == "default" and is_default and not spec then
-        return at(stmt)
+        local value = stmt:field("value")[1]
+        return value and value:type() == "identifier" and local_decl(node_text(value, src)) or at(stmt)
       end
       local decl = stmt:field("declaration")[1]
       -- Everything but TS's `export = x`, whose members the line scan finds.
@@ -889,11 +899,15 @@ end
 -- message rather than a Lua error out of the mapping.
 local function jump(path, row, col)
   vim.cmd "normal! m'"
+  -- Tagstack entry too, as LSP gd pushes one, so <C-t> comes back.
+  local from = { vim.fn.bufnr "%", vim.fn.line ".", vim.fn.col ".", 0 }
+  local items = { { tagname = vim.fn.expand "<cword>", from = from } }
   local ok, err = pcall(vim.cmd.edit, vim.fn.fnameescape(path))
   if not ok then
     vim.notify((tostring(err):gsub("^Vim:", "")), vim.log.levels.ERROR)
     return
   end
+  vim.fn.settagstack(vim.fn.win_getid(), { items = items }, "t")
   if row then
     pcall(vim.api.nvim_win_set_cursor, 0, { row + 1, col })
   end
@@ -907,8 +921,16 @@ function M.goto_imported_name()
   if not node then
     return false
   end
+  -- `ns.foo`, or `ns.Foo` in a type: the binding is `ns`, the export `foo`.
+  local word, member = node_text(node, 0), nil
+  local parent = node:parent()
+  local pt = parent and parent:type()
+  local object = pt == "member_expression" and parent:field("property")[1] == node and parent:field("object")[1]
+    or pt == "nested_type_identifier" and parent:field("name")[1] == node and parent:field("module")[1]
   local nt = node:type()
-  if
+  if object and object:type() == "identifier" then
+    word, member = node_text(object, 0), word
+  elseif
     nt ~= "identifier"
     and nt ~= "type_identifier"
     and nt ~= "shorthand_property_identifier"
@@ -920,7 +942,14 @@ function M.goto_imported_name()
   if file == "" then
     return false
   end
-  local spec, name = imported_binding(node:tree():root(), node_text(node, 0))
+  local spec, name = imported_binding(node:tree():root(), word, 0)
+  if member then
+    -- Only a whole-module binding has the member as an export.
+    if name ~= nil then
+      return false
+    end
+    name = member
+  end
   local target = spec and M.resolve(spec, file)
   if not target then
     return false
