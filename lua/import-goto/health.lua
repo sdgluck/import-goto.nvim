@@ -2,10 +2,10 @@ local M = {}
 
 function M.check()
   vim.health.start "import-goto"
-  if vim.fn.has "nvim-0.10" == 1 then
-    vim.health.ok "Neovim >= 0.10"
+  if vim.fn.has "nvim-0.11" == 1 then
+    vim.health.ok "Neovim >= 0.11"
   else
-    vim.health.error "Neovim 0.10+ required (vim.fs.joinpath, vim.islist)"
+    vim.health.error "Neovim 0.11+ required (current JS/TS parsers use treesitter ABI 15)"
   end
   -- Path resolution needs no parser; the cursor helpers and gd on an imported
   -- name do.

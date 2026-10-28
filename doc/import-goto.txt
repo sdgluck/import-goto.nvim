@@ -21,7 +21,7 @@ With no LSP attached, `gd` on an imported name jumps to its export in the
 resolved module. Anything unresolvable falls back to the LSP definition, then
 to built-in |gd|.
 
-Requires Neovim 0.10+ and the javascript, typescript and tsx treesitter
+Requires Neovim 0.11+ and the javascript, typescript and tsx treesitter
 parsers. See |:checkhealth| import-goto.
 
 ==============================================================================

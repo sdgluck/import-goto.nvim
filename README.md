@@ -38,7 +38,7 @@ Not handled (falls back to the LSP): Yarn PnP, `typesVersions`, `rootDirs`,
 
 ## Install
 
-Requires Neovim 0.10+. The `javascript`, `typescript` and `tsx` treesitter
+Requires Neovim 0.11+. The `javascript`, `typescript` and `tsx` treesitter
 parsers are needed for the cursor features (path resolution itself needs none).
 
 ```lua
