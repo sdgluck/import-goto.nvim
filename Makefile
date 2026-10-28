@@ -36,7 +36,7 @@ $(DEPS)/site/parser/tsx.so: | $(DEPS)/src/tree-sitter-typescript
 	cc -shared -fPIC -O2 -I$|/tsx/src $|/tsx/src/parser.c $|/tsx/src/scanner.c -o $@
 
 lint:
-	stylua --check lua tests
+	stylua --config-path .stylua.toml --check lua tests
 
 clean:
 	rm -rf $(DEPS)

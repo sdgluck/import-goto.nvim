@@ -40,14 +40,14 @@ local config = require "import-goto.config"
 local function is_module_call(callee)
   return callee == "require"
     or callee == "import"
-    or callee:match("%.mock$")
-    or callee:match("%.doMock$")
-    or callee:match("%.unmock$")
-    or callee:match("%.requireActual$")
-    or callee:match("%.requireMock$")
-    or callee:match("%.importActual$")
-    or callee:match("%.importMock$")
-    or callee:match("^require%.resolve$")
+    or callee:match "%.mock$"
+    or callee:match "%.doMock$"
+    or callee:match "%.unmock$"
+    or callee:match "%.requireActual$"
+    or callee:match "%.requireMock$"
+    or callee:match "%.importActual$"
+    or callee:match "%.importMock$"
+    or callee:match "^require%.resolve$"
 end
 
 local function stat_type(p)
@@ -138,7 +138,7 @@ local function read_json(path)
   if not fd then
     return nil
   end
-  local text = fd:read("*a")
+  local text = fd:read "*a"
   fd:close()
   local ok, value = pcall(vim.json.decode, strip_jsonc(text), { luanil = { object = true, array = true } })
   value = ok and type(value) == "table" and value or nil
@@ -189,7 +189,7 @@ local function match_pattern_map(map, key)
   end
   local best, best_len, star
   for pat, target in pairs(map) do
-    local pre, post = pat:match("^(.-)%*(.*)$")
+    local pre, post = pat:match "^(.-)%*(.*)$"
     if
       pre
       and #key >= #pre + #post
@@ -235,7 +235,7 @@ local function package_root_entry(pkg)
       return e
     end
   end
-  for _, field in ipairs({ "source", "types", "typings", "module", "main" }) do
+  for _, field in ipairs { "source", "types", "typings", "module", "main" } do
     if type(pkg[field]) == "string" then
       return pkg[field]
     end
@@ -252,7 +252,7 @@ function resolve_file(base, depth)
   if is_file(base) then
     return base
   end
-  local stem, ext = base:match("^(.*)(%.[mc]?jsx?)$")
+  local stem, ext = base:match "^(.*)(%.[mc]?jsx?)$"
   if stem then
     for _, e in ipairs(EXT_SWAPS[ext] or {}) do
       if is_file(stem .. e) then
@@ -293,15 +293,15 @@ local function prefer_source(path)
   if real:find("/node_modules/", 1, true) then
     return real
   end
-  if not (real:match("%.d%.[mc]?ts$") or real:match("%.[mc]?js$")) then
+  if not (real:match "%.d%.[mc]?ts$" or real:match "%.[mc]?js$") then
     return real
   end
   for _, out in ipairs(config.options.out_dirs) do
     local pre, rest = real:match("^(.*)/" .. out .. "/(.*)$")
     if pre then
       rest = rest:gsub("%.d%.[mc]?ts$", ""):gsub("%.[mc]?js$", "")
-      for _, root in ipairs({ pre .. "/src/", pre .. "/" }) do
-        for _, e in ipairs({ ".ts", ".tsx", ".mts", ".cts", "/index.ts", "/index.tsx" }) do
+      for _, root in ipairs { pre .. "/src/", pre .. "/" } do
+        for _, e in ipairs { ".ts", ".tsx", ".mts", ".cts", "/index.ts", "/index.tsx" } do
           if is_file(root .. rest .. e) then
             return root .. rest .. e
           end
@@ -326,7 +326,7 @@ local function resolve_extends(spec, dir)
       return p .. "/tsconfig.json"
     end
   end
-  if spec:match("^%.%.?/") or spec:sub(1, 1) == "/" then
+  if spec:match "^%.%.?/" or spec:sub(1, 1) == "/" then
     return as_config(join(dir, spec))
   end
   for d in vim.fs.parents(dir .. "/x") do
@@ -388,7 +388,7 @@ end
 -- config actually carries `paths`.
 local function project_config(file)
   for dir in vim.fs.parents(file) do
-    for _, name in ipairs({ "tsconfig.json", "jsconfig.json" }) do
+    for _, name in ipairs { "tsconfig.json", "jsconfig.json" } do
       local p = dir .. "/" .. name
       if is_file(p) then
         local cfg = load_tsconfig(p)
@@ -457,7 +457,7 @@ local function resolve_subpath_import(spec, file)
     return nil
   end
   t = fill_star(t, star)
-  if t:match("^%.") then
+  if t:match "^%." then
     return resolve_file(join(vim.fs.dirname(pj), t))
   end
   return M.resolve(t, pj)
@@ -466,9 +466,9 @@ end
 local function split_package(spec)
   local name, sub
   if spec:sub(1, 1) == "@" then
-    name, sub = spec:match("^(@[^/]+/[^/]+)/?(.*)$")
+    name, sub = spec:match "^(@[^/]+/[^/]+)/?(.*)$"
   else
-    name, sub = spec:match("^([^/]+)/?(.*)$")
+    name, sub = spec:match "^([^/]+)/?(.*)$"
   end
   return name, sub or ""
 end
@@ -490,7 +490,7 @@ local function resolve_package(spec, file)
     end
   end
   local function prefer_types(r, nm)
-    if r and r:match("%.[mc]?js$") then
+    if r and r:match "%.[mc]?js$" then
       return types_for(nm) or r
     end
     return r
@@ -544,7 +544,7 @@ function M.resolve(spec, file)
   local dir = vim.fs.dirname(file)
   local found
 
-  if spec:match("^%.%.?/") or spec == "." or spec == ".." then
+  if spec:match "^%.%.?/" or spec == "." or spec == ".." then
     found = resolve_file(join(dir, spec))
   elseif spec:sub(1, 1) == "#" then
     found = resolve_subpath_import(spec, file)
@@ -626,10 +626,10 @@ local function unquote(s)
 end
 
 local function lang_for(path)
-  if path:match("%.tsx$") then
+  if path:match "%.tsx$" then
     return "tsx"
   end
-  if path:match("%.[mc]?ts$") then
+  if path:match "%.[mc]?ts$" then
     return "typescript"
   end
   return "javascript"
@@ -870,7 +870,7 @@ function M.goto_imported_name()
     return false
   end
   local loc = (name and find_export(target, name)) or { path = target }
-  vim.cmd("normal! m'")
+  vim.cmd "normal! m'"
   vim.cmd.edit(vim.fn.fnameescape(loc.path))
   if loc.row then
     pcall(vim.api.nvim_win_set_cursor, 0, { loc.row + 1, loc.col })
@@ -882,7 +882,7 @@ end
 -- (or when it doesn't resolve and an LSP is attached) run `fallback`. With no
 -- LSP, an imported name jumps to its export before falling back.
 function M.goto_definition(fallback)
-  local has_lsp = #vim.lsp.get_clients({ bufnr = 0, method = "textDocument/definition" }) > 0
+  local has_lsp = #vim.lsp.get_clients { bufnr = 0, method = "textDocument/definition" } > 0
   local spec = M.specifier_at_cursor()
   if not spec then
     if not has_lsp and M.goto_imported_name() then
@@ -893,7 +893,7 @@ function M.goto_definition(fallback)
   local file = vim.api.nvim_buf_get_name(0)
   local target = file ~= "" and M.resolve(spec, file)
   if target then
-    vim.cmd("normal! m'")
+    vim.cmd "normal! m'"
     vim.cmd.edit(vim.fn.fnameescape(target))
     return
   end
