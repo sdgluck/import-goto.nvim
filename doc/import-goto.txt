@@ -1,0 +1,67 @@
+*import-goto.txt*  Jump from a JS/TS import specifier to the file it resolves to
+
+==============================================================================
+CONTENTS                                                *import-goto*
+
+  1. Introduction ............ |import-goto-intro|
+  2. Setup ................... |import-goto-setup|
+  3. API ..................... |import-goto-api|
+
+==============================================================================
+1. INTRODUCTION                                         *import-goto-intro*
+
+`gd` on an import/export/require/import()/jest.mock() path opens the file it
+resolves to, the way TypeScript and Node resolve it: relative paths with
+extension probing, tsconfig `paths`/`baseUrl` (following `extends` and
+solution-style `references`), package.json `imports`, and `node_modules`
+packages honouring `exports`. Workspace packages built to dist/ land on their
+src/ files.
+
+With no LSP attached, `gd` on an imported name jumps to its export in the
+resolved module. Anything unresolvable falls back to the LSP definition, then
+to built-in |gd|.
+
+Requires Neovim 0.10+ and the javascript, typescript and tsx treesitter
+parsers. See |:checkhealth| import-goto.
+
+==============================================================================
+2. SETUP                                                *import-goto-setup*
+
+>lua
+    require("import-goto").setup {
+      filetypes = { "javascript", "javascriptreact", "typescript", "typescriptreact" },
+      gd = true,
+      gf = true,
+      conditions = { "source", "types", "typings", "import", "module", "require", "node", "default" },
+      out_dirs = { "dist", "build", "out", "lib" },
+    }
+<
+  filetypes   Buffers that get the mapping and the gf hook.
+  gd          Map buffer-local `gd`. false to wire it yourself.
+  gf          Set 'includeexpr' so |gf| and |CTRL-W_f| resolve specifiers.
+  conditions  Order to pick through `exports`/`imports` condition objects.
+              Replaces the default list rather than merging into it.
+  out_dirs    Build-output dirs in workspace packages to hop back to src/ from.
+
+==============================================================================
+3. API                                                  *import-goto-api*
+
+resolve({spec}, {file})                          *import-goto.resolve()*
+    Resolve module specifier {spec} written in {file}. Returns an absolute
+    path, or nil.
+
+specifier_at_cursor()                *import-goto.specifier_at_cursor()*
+    The module path string under the cursor, or nil when the cursor is not
+    on one (or it is a template string with substitutions).
+
+goto_imported_name()                  *import-goto.goto_imported_name()*
+    Jump to the export of the imported name under the cursor. Returns false
+    when the word is not an import binding or its module does not resolve.
+
+goto_definition({fallback})              *import-goto.goto_definition()*
+    The `gd` behaviour: open the resolved import path, else call {fallback}.
+
+includeexpr({fname})                          *import-goto.includeexpr()*
+    For 'includeexpr': the resolved path, or {fname} unchanged.
+
+ vim:tw=78:ts=8:ft=help:norl:
