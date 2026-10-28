@@ -10,19 +10,17 @@ CONTENTS                                                *import-goto*
 ==============================================================================
 1. INTRODUCTION                                         *import-goto-intro*
 
-`gd` on an import/export/require/import()/jest.mock() path opens the file it
-resolves to, the way TypeScript and Node resolve it: relative paths with
-extension probing, tsconfig `paths`/`baseUrl` (following `extends` and
-solution-style `references`), package.json `imports`, and `node_modules`
-packages honouring `exports`. Workspace packages built to dist/ land on their
-src/ files.
+- `gd` on an import path opens the resolved file.
+- `gd` on an imported name (or `ns.name`) opens its export, when no LSP is
+  attached.
+- |gf| and |CTRL-W_f| resolve import paths the same way.
+- Anything unresolved falls back to the LSP definition, then built-in |gd|.
 
-With no LSP attached, `gd` on an imported name jumps to its export in the
-resolved module. Anything unresolvable falls back to the LSP definition, then
-to built-in |gd|.
+Supports relative paths, tsconfig/jsconfig `paths` and `baseUrl`,
+package.json `imports`, node_modules packages, `@types` and Node builtins.
 
 Requires Neovim 0.11+ and the javascript, typescript and tsx treesitter
-parsers. See |:checkhealth| import-goto.
+parsers. Run `:checkhealth import-goto` to check.
 
 ==============================================================================
 2. SETUP                                                *import-goto-setup*
@@ -39,9 +37,9 @@ parsers. See |:checkhealth| import-goto.
   filetypes   Buffers that get the mapping and the gf hook.
   gd          Map buffer-local `gd`. false to wire it yourself.
   gf          Set 'includeexpr' so |gf| and |CTRL-W_f| resolve specifiers.
-  conditions  Order to pick through `exports`/`imports` condition objects.
-              Replaces the default list rather than merging into it.
-  out_dirs    Build-output dirs in workspace packages to hop back to src/ from.
+  conditions  Order to pick `exports`/`imports` conditions in. Replaces the
+              default list.
+  out_dirs    Build dirs in workspace packages to map back to src/.
 
 ==============================================================================
 3. API                                                  *import-goto-api*
